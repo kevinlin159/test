@@ -126,43 +126,58 @@ def try_fill_candidates(page, selectors, value, timeout=2000) -> bool:
                 continue
     return False
 
-def check_all_checkboxes_under_section(page) -> int:
+def check_specific_data_types(page) -> int:
+    """选择特定的资料种类：公司、分公司、商業、工廠、有限合夥"""
     checked = 0
-    if try_click_any(page, ["全選", "全部", "Select All"], timeout=800):
-        return -1
-    candidates = [
-        "section:has-text('資料種類')",
-        "div:has-text('資料種類')",
-        "fieldset:has-text('資料種類')",
-        "form:has-text('資料種類')",
-        "body",
-    ]
-    for container in candidates:
+    
+    # 要选择的资料种类
+    target_types = ["公司", "分公司", "商業", "工廠", "有限合夥"]
+    
+    for data_type in target_types:
         try:
-            cont = page.locator(container).first
-            boxes = cont.locator("input[type='checkbox']")
-            count = boxes.count()
-            for i in range(count):
-                box = boxes.nth(i)
+            # 尝试多种选择器来找到对应的复选框
+            selectors = [
+                f"input[type='checkbox'][value*='{data_type}']",
+                f"input[type='checkbox'] + label:has-text('{data_type}')",
+                f"label:has-text('{data_type}') input[type='checkbox']",
+                f"input[type='checkbox'][id*='{data_type}']",
+                f"input[type='checkbox'][name*='{data_type}']"
+            ]
+            
+            for selector in selectors:
                 try:
-                    if not box.is_checked():
-                        box.check(force=True)
+                    checkbox = page.locator(selector).first
+                    if not checkbox.is_checked():
+                        checkbox.check()
                         checked += 1
-                except Exception:
-                    try:
-                        box.click()
-                        checked += 1
-                    except Exception:
-                        continue
-            if checked:
-                return checked
+                        break
+                except:
+                    continue
         except Exception:
             continue
+    
+    # 如果上面的方法都失败，尝试通用方法
+    if checked == 0:
+        try:
+            # 找到所有复选框并全选
+            checkboxes = page.locator("input[type='checkbox']")
+            count = checkboxes.count()
+            for i in range(count):
+                try:
+                    box = checkboxes.nth(i)
+                    if not box.is_checked():
+                        box.check()
+                        checked += 1
+                except:
+                    continue
+        except:
+            pass
+    
     return checked
 
 def export_pdf_from_printable(page, out_path: Path):
-    page.wait_for_load_state("load", timeout=8000)  # 减少到8秒
-    time.sleep(0.5)  # 减少到0.5秒
+    page.wait_for_load_state("load", timeout=8000)
+    time.sleep(0.5)
     page.pdf(
         path=str(out_path),
         format="A4",
@@ -190,38 +205,43 @@ def fetch_one(pw, ubn: str, headless: bool = True) -> Path:
     context = browser.new_context(locale="zh-TW")
     page = context.new_page()
 
-    page.goto(FIND_BIZ_URL, wait_until="domcontentloaded", timeout=15000)  # 减少到15秒
+    # 1. 打开网页
+    page.goto(FIND_BIZ_URL, wait_until="domcontentloaded", timeout=15000)
+    
+    # 处理可能的弹窗
     try_click_any(page, ["同意", "我知道了", "確定", "接受", "關閉"])
-    try_click_any(page, ["統一編號", "以統一編號查詢", "Business ID", "BAN"])
-
-    _ = check_all_checkboxes_under_section(page)
-
+    
+    # 2. 选择特定的资料种类
+    checked = check_specific_data_types(page)
+    
+    # 3. 输入统一编号
     filled = try_fill_candidates(page,
-        ["input[name='qryCond']",
-         "input[name='banNo']",
-         "input[id='banNo']",
-         "input[placeholder*='統一編號']",
-         "input[type='text']"],
+        ["input[name='qryCond']",           # 最常见的查询条件输入框
+         "input[name='banNo']",             # 统一编号输入框
+         "input[id='banNo']",               # 通过ID查找
+         "input[placeholder*='統一編號']",    # 通过placeholder查找
+         "input[type='text']:visible"],     # 可见的文本输入框
         ubn)
+    
     if not filled:
         raise RuntimeError("找不到可輸入統一編號的欄位。")
 
-    if not try_click_any(page, ["查詢", "搜尋", "Search", "送出"]):
+    # 4. 点击查询按钮
+    if not try_click_any(page, ["查詢", "搜尋", "Search", "送出", "查询"]):
         page.keyboard.press("Enter")
 
-    page.wait_for_load_state("networkidle", timeout=10000)  # 减少到10秒
+    # 5. 等待查询结果
+    page.wait_for_load_state("networkidle", timeout=10000)
+    time.sleep(2)
 
-    # 额外等待确保页面完全加载
-    time.sleep(2)  # 减少到2秒
-
-    # 等待友善列印按钮出现
+    # 6. 等待友善列印按钮出现
     try:
-        page.wait_for_selector("text=友善列印", timeout=5000)  # 减少到5秒
+        page.wait_for_selector("text=友善列印", timeout=5000)
     except:
         pass
 
-    with context.expect_page(timeout=10000) as newp:  # 减少到10秒
-        # 直接点击友善列印按钮
+    # 7. 点击友善列印
+    with context.expect_page(timeout=10000) as newp:
         try:
             page.click("text=友善列印", timeout=3000)
         except:
@@ -230,12 +250,9 @@ def fetch_one(pw, ubn: str, headless: bool = True) -> Path:
             except:
                 clicked = try_click_any(page, ["友善列印", "列印", "Friendly Print", "Print"])
                 if not clicked:
-                    try_click_any(page, ["更多", "更多功能", "更多操作", "更多動作", "Actions", "More"])
-                    if not try_click_any(page, ["友善列印", "列印"]):
-                        raise RuntimeError("找不到「友善列印」。")
+                    raise RuntimeError("找不到「友善列印」按钮。")
     
     ppage = newp.value
-
     out_path = OUTPUT_DIR / f"findbiz_{ubn}.pdf"
     export_pdf_from_printable(ppage, out_path)
 
