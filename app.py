@@ -1,4 +1,3 @@
-
 # -*- coding: utf-8 -*-
 import io
 import os
@@ -173,7 +172,21 @@ def export_pdf_from_printable(page, out_path: Path):
     )
 
 def fetch_one(pw, ubn: str, headless: bool = True) -> Path:
-    browser = pw.chromium.launch(headless=headless, args=["--disable-blink-features=AutomationControlled"])
+    # 添加服务器环境必需的浏览器参数
+    browser_args = [
+        "--disable-blink-features=AutomationControlled",
+        "--no-sandbox",                    # 必需：禁用沙盒
+        "--disable-dev-shm-usage",         # 必需：禁用 /dev/shm 使用
+        "--disable-gpu",                   # 禁用 GPU
+        "--disable-software-rasterizer",   # 禁用软件光栅化
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--disable-features=TranslateUI",
+        "--disable-ipc-flooding-protection",
+    ]
+    
+    browser = pw.chromium.launch(headless=headless, args=browser_args)
     context = browser.new_context(locale="zh-TW")
     page = context.new_page()
 
@@ -226,6 +239,12 @@ def index():
 def run_batch():
     raw = request.form.get("ubns", "")
     headed = request.form.get("headed") == "on"
+    
+    # 在生产环境中强制无头模式
+    is_production = os.environ.get("PORT") is not None or os.environ.get("RENDER") is not None or os.environ.get("RAILWAY_ENVIRONMENT") is not None
+    if is_production:
+        headed = False  # 生产环境强制无头模式
+    
     ubns = normalize_ubns(raw)
     if not ubns:
         flash("請至少輸入 1 個有效統編（8 碼數字）。", "error")
