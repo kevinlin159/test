@@ -57,8 +57,8 @@ INDEX_HTML = """
       <form method="post" action="{{ url_for('run_batch') }}">
         <label>統一編號清單（每行 1 個，必須為 8 碼數字）</label>
         <textarea name="ubns" placeholder="例如：
-24536806
-53022509
+96942465
+84480094
 12345678
 "></textarea>
 
@@ -161,8 +161,8 @@ def check_all_checkboxes_under_section(page) -> int:
     return checked
 
 def export_pdf_from_printable(page, out_path: Path):
-    page.wait_for_load_state("load", timeout=20000)
-    time.sleep(0.8)
+    page.wait_for_load_state("load", timeout=8000)  # 减少到8秒
+    time.sleep(0.5)  # 减少到0.5秒
     page.pdf(
         path=str(out_path),
         format="A4",
@@ -175,10 +175,10 @@ def fetch_one(pw, ubn: str, headless: bool = True) -> Path:
     # 添加服务器环境必需的浏览器参数
     browser_args = [
         "--disable-blink-features=AutomationControlled",
-        "--no-sandbox",                    # 必需：禁用沙盒
-        "--disable-dev-shm-usage",         # 必需：禁用 /dev/shm 使用
-        "--disable-gpu",                   # 禁用 GPU
-        "--disable-software-rasterizer",   # 禁用软件光栅化
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
         "--disable-background-timer-throttling",
         "--disable-backgrounding-occluded-windows",
         "--disable-renderer-backgrounding",
@@ -190,7 +190,7 @@ def fetch_one(pw, ubn: str, headless: bool = True) -> Path:
     context = browser.new_context(locale="zh-TW")
     page = context.new_page()
 
-    page.goto(FIND_BIZ_URL, wait_until="domcontentloaded", timeout=30000)
+    page.goto(FIND_BIZ_URL, wait_until="domcontentloaded", timeout=15000)  # 减少到15秒
     try_click_any(page, ["同意", "我知道了", "確定", "接受", "關閉"])
     try_click_any(page, ["統一編號", "以統一編號查詢", "Business ID", "BAN"])
 
@@ -209,14 +209,31 @@ def fetch_one(pw, ubn: str, headless: bool = True) -> Path:
     if not try_click_any(page, ["查詢", "搜尋", "Search", "送出"]):
         page.keyboard.press("Enter")
 
-    page.wait_for_load_state("networkidle", timeout=20000)
+    page.wait_for_load_state("networkidle", timeout=10000)  # 减少到10秒
 
-    with context.expect_page(timeout=15000) as newp:
-        clicked = try_click_any(page, ["友善列印", "列印", "Friendly Print", "Print"])
-        if not clicked:
-            try_click_any(page, ["更多", "更多功能", "更多操作", "更多動作", "Actions", "More"])
-            if not try_click_any(page, ["友善列印", "列印"]):
-                raise RuntimeError("找不到「友善列印」。")
+    # 额外等待确保页面完全加载
+    time.sleep(2)  # 减少到2秒
+
+    # 等待友善列印按钮出现
+    try:
+        page.wait_for_selector("text=友善列印", timeout=5000)  # 减少到5秒
+    except:
+        pass
+
+    with context.expect_page(timeout=10000) as newp:  # 减少到10秒
+        # 直接点击友善列印按钮
+        try:
+            page.click("text=友善列印", timeout=3000)
+        except:
+            try:
+                page.click("a:has-text('友善列印')", timeout=3000)
+            except:
+                clicked = try_click_any(page, ["友善列印", "列印", "Friendly Print", "Print"])
+                if not clicked:
+                    try_click_any(page, ["更多", "更多功能", "更多操作", "更多動作", "Actions", "More"])
+                    if not try_click_any(page, ["友善列印", "列印"]):
+                        raise RuntimeError("找不到「友善列印」。")
+    
     ppage = newp.value
 
     out_path = OUTPUT_DIR / f"findbiz_{ubn}.pdf"
